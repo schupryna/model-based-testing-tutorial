@@ -20,13 +20,15 @@ const getEventConfigs = () => {
   const eventConfigs = {
     // What action in the UI would trigger this event?
     ADD_TO_CART: {
-      exec: async () => {
+      exec: async ({ getByText }: RenderResult) => {
         // Action
+        fireEvent.click(getByText("Add to cart"));
       },
     },
     PLACE_ORDER: {
-      exec: async () => {
+      exec: async ({ getByText }: RenderResult) => {
         // Action
+        fireEvent.click(getByText("Place Order"));
       },
     },
   };
@@ -36,18 +38,21 @@ const getEventConfigs = () => {
 
 const shoppingTest = {
   // What do I assert to verify the UI is in the Shopping state?
-  test: async () => {
+  test: async ({ getByText }: RenderResult) => {
     // Assert
+    await wait(() => expect(() => getByText("shopping")).not.toThrowError());
   },
 };
 const cartTest = {
-  test: async () => {
+  test: async ({ getByText }: RenderResult) => {
     // Assert
+    await wait(() => expect(() => getByText("cart")).not.toThrowError());
   },
 };
 const orderedTest = {
-  test: async () => {
+  test: async ({ getByText }: RenderResult) => {
     // Assert
+    await wait(() => expect(() => getByText("ordered")).not.toThrowError());
   },
 };
 
@@ -67,9 +72,16 @@ describe("Order", () => {
 
     const testPlans = testModel.getShortestPathPlans();
 
+    console.log(
+      "%ctestPlans>>>>>>>>>>>>>>>>>>>>>>>>>>>>>",
+      "color: green; font-size: larger; font-weight: bold",
+      testPlans
+    );
+
     testPlans.forEach((plan) => {
       describe(plan.description, () => {
         plan.paths.forEach((path) => {
+          console.log("path: >>>>>", JSON.stringify(path, null, 2));
           it(path.description, async () => {
             await path.test(render(<Order />));
           });

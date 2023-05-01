@@ -21,10 +21,19 @@ const getTestMachine = () =>
       initial: "shopping",
       context: {
         ordersCompleted: 0,
+        ordersCanceled: 0,
       },
       states: {
         shopping: { on: { ADD_TO_CART: "cart" } },
-        cart: { on: { PLACE_ORDER: "ordered" } },
+        cart: {
+          on: {
+            PLACE_ORDER: "ordered",
+            CANCEL: {
+              actions: ["orderCanceled"],
+              target: "shopping",
+            },
+          },
+        },
         ordered: {
           on: {
             CONTINUE_SHOPPING: {
@@ -39,6 +48,9 @@ const getTestMachine = () =>
       actions: {
         orderCompleted: assign((context) => ({
           ordersCompleted: context.ordersCompleted + 1,
+        })),
+        orderCanceled: assign((context) => ({
+          ordersCanceled: context.ordersCanceled + 1,
         })),
       },
     }
@@ -59,6 +71,11 @@ const getEventConfigs = () => {
     CONTINUE_SHOPPING: {
       exec: async ({ getByText }: RenderResult) => {
         fireEvent.click(getByText("Continue Shopping"));
+      },
+    },
+    CANCEL: {
+      exec: async ({ getByText }: RenderResult) => {
+        fireEvent.click(getByText("Cancel"));
       },
     },
   };
@@ -95,7 +112,8 @@ describe("Order", () => {
     );
 
     const testPlans = testModel.getShortestPathPlans({
-      filter: (state) => state.context.ordersCompleted <= 1,
+      filter: (state) =>
+        state.context.ordersCompleted <= 1 && state.context.ordersCanceled <= 1,
     });
 
     testPlans.forEach((plan) => {

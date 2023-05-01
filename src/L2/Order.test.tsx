@@ -16,16 +16,34 @@ import React from "react";
 
 // Context is considered a unique state
 const getTestMachine = () =>
-  Machine({
-    id: "order",
-    initial: "shopping",
-    context: {},
-    states: {
-      shopping: { on: { ADD_TO_CART: "cart" } },
-      cart: { on: { PLACE_ORDER: "ordered" } },
-      ordered: { on: { CONTINUE_SHOPPING: "shopping" } },
+  Machine(
+    {
+      id: "order",
+      initial: "shopping",
+      context: {
+        completedOrder: 0,
+      },
+      states: {
+        shopping: { on: { ADD_TO_CART: { target: "cart" } } },
+        cart: { on: { PLACE_ORDER: { target: "ordered" } } },
+        ordered: {
+          on: {
+            CONTINUE_SHOPPING: {
+              target: "shopping",
+              actions: ["setCompletedOrder"],
+            },
+          },
+        },
+      },
     },
-  });
+    {
+      actions: {
+        setCompletedOrder: assign(({ completedOrder }) => ({
+          completedOrder: completedOrder + 1,
+        })),
+      },
+    }
+  );
 
 const getEventConfigs = () => {
   const eventConfigs = {
@@ -39,7 +57,11 @@ const getEventConfigs = () => {
         fireEvent.click(getByText("Place Order"));
       },
     },
-    // New Event
+    CONTINUE_SHOPPING: {
+      exec: async ({ getByText }: RenderResult) => {
+        fireEvent.click(getByText("Continue Shopping"));
+      },
+    },
   };
 
   return eventConfigs;
@@ -74,7 +96,9 @@ describe("Order", () => {
     );
 
     // Add filter to handle infinite iterations
-    const testPlans = testModel.getShortestPathPlans();
+    const testPlans = testModel.getShortestPathPlans({
+      filter: (state) => state.context.completedOrder <= 1,
+    });
 
     testPlans.forEach((plan) => {
       describe(plan.description, () => {

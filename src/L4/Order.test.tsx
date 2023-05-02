@@ -5,29 +5,11 @@ import { render, RenderResult, fireEvent, wait } from "@testing-library/react";
 import React from "react";
 
 ////////////////////////////////////////////////////////////////////////////////
-// Testing Asynchronous Services
+// Testing Asynchronous Services - FINAL
 ////////////////////////////////////////////////////////////////////////////////
 
-// 1. Copy in machine updates
-//    Service is not needed in test machine, just src
-// But we do need to mock the UI service's Promise resolve and reject
-// Oh no! If the event for done/error happens after we already clicked "Place Order"
-//    how do we mock?!
-// No worries, we can pass the promise through the Test Cycle and resolve/reject later
-// 2. Wrap render in an object so we can manage a context for the Test Cycle (TestCycleContext)
-// 3. Pass in all the needed properties
-// 4. Update exec functions to deconstruct from TestCycleContext
-// 5. Mock in PLACE_ORDER event before clicking,
-//    setSubmitOrderCallbacks to the callbacks of the promised that is passed into mockReturnValueOnce
-// 6. Add Event for done.invoke.submitOrder to resolve
-// 7. Add Event for error.platform.submitOrder to reject
-// 8. Add Assertions for placingOrder state
-// 9. Add Assertions for orderFailed state
-// 10. Add context to ensure the order fails then succeeds in a path
-// 11. Add filter to avoid infinite loops
-
 type PromiseCallbacks = {
-  resolve: (value?: any) => void;
+  resolve: (value?: unknown) => void;
   reject: (reason?: any) => void;
 };
 
@@ -50,12 +32,26 @@ const getTestMachine = () =>
       context: {
         cartsCanceled: 0,
         ordersCompleted: 0,
+        ordersFailed: 0,
       },
       states: {
         shopping: { on: { ADD_TO_CART: "cart" } },
         cart: {
           on: {
-            PLACE_ORDER: "ordered",
+            PLACE_ORDER: "placingOrder",
+            CANCEL: { actions: ["cartCanceled"], target: "shopping" },
+          },
+        },
+        placingOrder: {
+          invoke: {
+            src: "submitOrder",
+            onDone: "ordered",
+            onError: { actions: ["orderFailed"], target: "orderFailed" },
+          },
+        },
+        orderFailed: {
+          on: {
+            PLACE_ORDER: "placingOrder",
             CANCEL: { actions: ["cartCanceled"], target: "shopping" },
           },
         },
@@ -77,6 +73,9 @@ const getTestMachine = () =>
         orderCompleted: assign((context) => ({
           ordersCompleted: context.ordersCompleted + 1,
         })),
+        orderFailed: assign((context) => ({
+          ordersFailed: context.ordersFailed + 1,
+        })),
       },
     }
   );
@@ -84,22 +83,46 @@ const getTestMachine = () =>
 const getEventConfigs = () => {
   const eventConfigs = {
     ADD_TO_CART: {
-      exec: async ({ getByText }: RenderResult) => {
+      exec: async ({ target: { getByText } }: TestCycleContext) => {
         fireEvent.click(getByText("Add to cart"));
       },
     },
     PLACE_ORDER: {
-      exec: async ({ getByText }: RenderResult) => {
+      exec: async ({
+        target: { getByText },
+        submitOrderMock,
+        setSubmitOrderCallbacks,
+      }: TestCycleContext) => {
+        const submitOrderPromise = new Promise((resolve, reject) => {
+          setSubmitOrderCallbacks({ resolve, reject });
+        });
+
+        submitOrderMock.mockReturnValueOnce(submitOrderPromise);
+
         fireEvent.click(getByText("Place Order"));
       },
     },
+    "done.invoke.submitOrder": {
+      exec: async ({ shared: { submitOrderCallbacks } }: TestCycleContext) => {
+        if (submitOrderCallbacks) {
+          submitOrderCallbacks.resolve();
+        }
+      },
+    },
+    "error.platform.submitOrder": {
+      exec: async ({ shared: { submitOrderCallbacks } }: TestCycleContext) => {
+        if (submitOrderCallbacks) {
+          submitOrderCallbacks.reject(new Error());
+        }
+      },
+    },
     CONTINUE_SHOPPING: {
-      exec: async ({ getByText }: RenderResult) => {
+      exec: async ({ target: { getByText } }: TestCycleContext) => {
         fireEvent.click(getByText("Continue Shopping"));
       },
     },
     CANCEL: {
-      exec: async ({ getByText }: RenderResult) => {
+      exec: async ({ target: { getByText } }: TestCycleContext) => {
         fireEvent.click(getByText("Cancel"));
       },
     },
@@ -109,27 +132,55 @@ const getEventConfigs = () => {
 };
 
 const shoppingTest = {
-  test: async ({ getByText }: RenderResult) => {
+  test: async ({ target: { getByText } }: TestCycleContext) => {
     await wait(() => expect(() => getByText("shopping")).not.toThrowError());
   },
 };
 const cartTest = {
-  test: async ({ getByText }: RenderResult) => {
+  test: async ({ target: { getByText } }: TestCycleContext) => {
     await wait(() => expect(() => getByText("cart")).not.toThrowError());
   },
 };
+const orderFailedTest = {
+  test: async ({ target: { getByText } }: TestCycleContext) => {
+    await wait(() => expect(() => getByText("orderFailed")).not.toThrowError());
+  },
+};
+const placingOrderTest = {
+  test: async ({ target: { getByText } }: TestCycleContext) => {
+    await wait(() =>
+      expect(() => getByText("placingOrder")).not.toThrowError()
+    );
+  },
+};
 const orderedTest = {
-  test: async ({ getByText }: RenderResult) => {
+  test: async ({ target: { getByText } }: TestCycleContext) => {
     await wait(() => expect(() => getByText("ordered")).not.toThrowError());
   },
 };
 
 describe("Order", () => {
   describe("matches all paths", () => {
+    let container: Node | null = null;
+
+    beforeEach(() => {
+      container = document.createElement("div");
+      document.body.appendChild(container);
+    });
+
+    afterEach(() => {
+      if (!container) return;
+
+      document.body.removeChild(container);
+      container = null;
+    });
+
     const testMachine = getTestMachine();
 
     (testMachine.states.shopping as any).meta = shoppingTest;
     (testMachine.states.cart as any).meta = cartTest;
+    (testMachine.states.orderFailed as any).meta = orderFailedTest;
+    (testMachine.states.placingOrder as any).meta = placingOrderTest;
     (testMachine.states.ordered as any).meta = orderedTest;
 
     const testModel = createModel(testMachine).withEvents(
@@ -140,10 +191,9 @@ describe("Order", () => {
       .getShortestPathPlans({
         filter: (state) =>
           state.context.ordersCompleted <= 1 &&
-          state.context.cartsCanceled <= 1,
+          state.context.cartsCanceled <= 1 &&
+          state.context.ordersFailed <= 1,
       })
-      // Added post-generation filter to reduce combinatorial explosion
-      // 10 tests instead of 35 tests
       .filter(
         (plan) =>
           plan.state.context.ordersCompleted === 1 &&
@@ -154,7 +204,6 @@ describe("Order", () => {
       describe(plan.description, () => {
         plan.paths.forEach((path) => {
           it(path.description, async () => {
-            // You'll need these for the TestCycleContext
             const submitOrderMock = jest.fn();
 
             const shared: Shared = {};
@@ -165,7 +214,14 @@ describe("Order", () => {
               shared.submitOrderCallbacks = submitOrderCallbacks;
             };
 
-            await path.test(render(<Order />));
+            await path.test({
+              target: render(
+                <Order services={{ submitOrder: submitOrderMock as any }} />
+              ),
+              shared,
+              setSubmitOrderCallbacks,
+              submitOrderMock,
+            } as TestCycleContext);
           });
         });
       });
